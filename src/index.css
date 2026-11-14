@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+:root {
+  /* Official MARS ECHO Brand Palette */
+  --me-blue-yonder: #2F96F5;
+  --me-neon-blue: #0960E1;
+  --me-electric-blue: #0042A6;
+  --me-deep-blue: #07173F;
+  --me-rocket-red: #E43700;
+  --me-martian-red: #8E1100;
+  --me-neon-yellow: #EAFE07;
+  --me-white: #FFFFFF;
+
+  /* Semantic Design Tokens */
+  --me-bg-app: var(--me-deep-blue);
+  --me-bg-panel: var(--me-electric-blue);
+  --me-border-subtle: rgba(0, 66, 166, 0.85);
+  --me-border-interactive: rgba(47, 150, 245, 0.45);
+  --me-text-primary: var(--me-white);
+  --me-text-secondary: rgba(255, 255, 255, 0.72);
+  --me-text-muted: rgba(255, 255, 255, 0.56);
+}
+
+@theme {
+  --font-sans: "Fira Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-blue-yonder: #2F96F5;
+  --color-neon-blue: #0960E1;
+  --color-electric-blue: #0042A6;
+  --color-deep-blue: #07173F;
+  --color-rocket-red: #E43700;
+  --color-martian-red: #8E1100;
+  --color-neon-yellow: #EAFE07;
+  --color-brand-white: #FFFFFF;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: var(--me-deep-blue);
+    color: var(--me-white);
+    font-family: var(--font-sans);
+  }
+}
+
+/* Custom scrollbars aligned to official palette */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--me-deep-blue);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--me-electric-blue);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--me-neon-blue);
+}
+
+/* OpenLayers canvas resets */
+.ol-viewport {
+  background-color: var(--me-deep-blue);
+}
+
+.ol-control {
+  display: none !important;
+}

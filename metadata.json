@@ -1,0 +1,8 @@
+{
+  "name": "MARS ECHO",
+  "description": "Martian surface exploration, GIS terrain intelligence, and mission planning platform for astronauts and mission planners.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
