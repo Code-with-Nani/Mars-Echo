@@ -502,12 +502,12 @@ function runAStarDirectedLeg(
       const nextCell = cellMatrix[nr][nc];
       if (!isCellTraversable(nextCell, rules)) continue;
 
-      // Prevent diagonal corner-cutting across blocked or No Data barriers
+      // Prevent diagonal corner-cutting: require BOTH adjacent orthogonal cells to be traversable
       if (dr !== 0 && dc !== 0) {
         const adj1 = cellMatrix[r + dr][c];
         const adj2 = cellMatrix[r][c + dc];
         if (
-          !isCellTraversable(adj1, rules) &&
+          !isCellTraversable(adj1, rules) ||
           !isCellTraversable(adj2, rules)
         ) {
           continue;

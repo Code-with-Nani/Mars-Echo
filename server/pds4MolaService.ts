@@ -347,14 +347,84 @@ async function ensureDir(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
 }
 
-async function fetchWithTimeout(
+export interface FetchWithTimeoutOptions {
+  init?: RequestInit;
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Executes an HTTP request with an active timeout covering BOTH response headers
+ * and complete response body consumption, reliably aborting stalled transfers and
+ * clearing all timers/listeners upon completion, failure, or timeout.
+ */
+export async function fetchWithTimeout<T>(
   url: string,
-  init: RequestInit = {}
-): Promise<Response> {
+  consumeBody: (res: Response) => Promise<T>,
+  options: FetchWithTimeoutOptions = {}
+): Promise<T> {
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const init = options.init ?? {};
+  const externalSignal = init.signal ?? undefined;
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(url, {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let activeResponse: Response | null = null;
+  let onExternalAbort: (() => void) | undefined;
+  let onControllerAbort: (() => void) | undefined;
+
+  const cancelActiveBody = () => {
+    try {
+      if (activeResponse && activeResponse.body && !activeResponse.body.locked) {
+        void activeResponse.body.cancel().catch(() => {});
+      }
+    } catch {
+      // Ignore stream cancellation cleanup errors
+    }
+  };
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason);
+    } else {
+      onExternalAbort = () => controller.abort(externalSignal.reason);
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
+
+  const abortPromise = new Promise<never>((_, reject) => {
+    const rejectWithReason = () => {
+      cancelActiveBody();
+      const reason = controller.signal.reason;
+      reject(
+        reason instanceof Error
+          ? reason
+          : new Error(
+              typeof reason === 'string' && reason
+                ? reason
+                : `NASA PDS4 request aborted after ${timeoutMs} ms`
+            )
+      );
+    };
+
+    if (controller.signal.aborted) {
+      rejectWithReason();
+      return;
+    }
+
+    onControllerAbort = rejectWithReason;
+    controller.signal.addEventListener('abort', onControllerAbort, { once: true });
+  });
+
+  timer = setTimeout(() => {
+    controller.abort(
+      new Error(`NASA PDS4 request timed out after ${timeoutMs} ms`)
+    );
+  }, timeoutMs);
+
+  const runRequest = (async () => {
+    const res = await fetchImpl(url, {
       ...init,
       headers: {
         'User-Agent': 'REDLINE-Mars-Explorer/1.0 (NASA-PDS4-MOLA-Reader)',
@@ -362,9 +432,150 @@ async function fetchWithTimeout(
       },
       signal: controller.signal,
     });
+    activeResponse = res;
+    return await consumeBody(res);
+  })();
+
+  // Prevent unhandled rejection if abortPromise wins the race first
+  runRequest.catch(() => {});
+
+  try {
+    return await Promise.race([runRequest, abortPromise]);
+  } catch (err) {
+    cancelActiveBody();
+    throw err;
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    if (externalSignal && onExternalAbort) {
+      externalSignal.removeEventListener('abort', onExternalAbort);
+    }
+    if (onControllerAbort) {
+      controller.signal.removeEventListener('abort', onControllerAbort);
+    }
   }
+}
+
+export interface ParsedContentRange {
+  start: number;
+  end: number;
+  total: number | null;
+}
+
+/**
+ * Strictly validates an HTTP Content-Range header against the requested inclusive byte range.
+ */
+export function parseAndValidateContentRange(
+  contentRangeHeader: string | null,
+  expectedStart: number,
+  expectedEnd: number,
+  resourceLabel: string
+): ParsedContentRange {
+  if (!contentRangeHeader || !contentRangeHeader.trim()) {
+    throw new Error(
+      `NASA PDS4 server returned HTTP 206 without a Content-Range header for ${resourceLabel} (requested bytes=${expectedStart}-${expectedEnd}).`
+    );
+  }
+
+  const trimmed = contentRangeHeader.trim();
+  const match = /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i.exec(trimmed);
+  if (!match) {
+    throw new Error(
+      `Malformed NASA PDS4 Content-Range header "${trimmed}" for ${resourceLabel} (expected "bytes ${expectedStart}-${expectedEnd}/<total>").`
+    );
+  }
+
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const total = match[3] === '*' ? null : Number(match[3]);
+
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start > end ||
+    (total !== null && (!Number.isSafeInteger(total) || end >= total))
+  ) {
+    throw new Error(
+      `Invalid NASA PDS4 Content-Range bounds "${trimmed}" for ${resourceLabel}.`
+    );
+  }
+
+  if (start !== expectedStart || end !== expectedEnd) {
+    throw new Error(
+      `NASA PDS4 Content-Range mismatch for ${resourceLabel}: requested bytes ${expectedStart}-${expectedEnd}, server returned ${start}-${end}.`
+    );
+  }
+
+  return { start, end, total };
+}
+
+/**
+ * Fetches an exact byte slice via HTTP Range, requiring HTTP 206 Partial Content,
+ * matching Content-Range header, and exact payload byte length while keeping the
+ * timeout active through full body consumption.
+ */
+export async function fetchPds4RangeBytes(
+  url: string,
+  startByte: number,
+  endByte: number,
+  resourceLabel: string,
+  options: Omit<FetchWithTimeoutOptions, 'init'> = {}
+): Promise<Buffer> {
+  if (
+    !Number.isSafeInteger(startByte) ||
+    !Number.isSafeInteger(endByte) ||
+    startByte < 0 ||
+    endByte < startByte
+  ) {
+    throw new Error(
+      `Invalid byte range ${startByte}-${endByte} requested for ${resourceLabel}.`
+    );
+  }
+
+  const expectedLen = endByte - startByte + 1;
+
+  return await fetchWithTimeout(
+    url,
+    async (res) => {
+      if (res.status === 200) {
+        await res.body?.cancel().catch(() => {});
+        throw new Error(
+          `NASA PDS4 server returned HTTP 200 (full file) instead of HTTP 206 Partial Content for ${resourceLabel}; HTTP Range requests are unsupported or ignored (requested bytes=${startByte}-${endByte}).`
+        );
+      }
+
+      if (res.status !== 206) {
+        await res.body?.cancel().catch(() => {});
+        throw new Error(
+          `NASA PDS4 raster range fetch failed for ${resourceLabel}: expected HTTP 206 Partial Content, got HTTP ${res.status}.`
+        );
+      }
+
+      parseAndValidateContentRange(
+        res.headers.get('content-range'),
+        startByte,
+        endByte,
+        resourceLabel
+      );
+
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.byteLength !== expectedLen) {
+        throw new Error(
+          `Invalid PDS4 raster range byte length for ${resourceLabel}: expected ${expectedLen} bytes (${startByte}-${endByte}), received ${buf.byteLength} bytes.`
+        );
+      }
+
+      return buf;
+    },
+    {
+      ...options,
+      init: {
+        headers: { Range: `bytes=${startByte}-${endByte}` },
+      },
+    }
+  );
 }
 
 async function getPds4TileLabel(
@@ -389,13 +600,15 @@ async function getPds4TileLabel(
   let bytesTransferred = 0;
   if (!promise) {
     promise = (async () => {
-      const res = await fetchWithTimeout(tile.xmlUrl);
-      if (!res.ok) {
-        throw new Error(
-          `NASA PDS4 XML label fetch failed for ${tile.productId}.xml (HTTP ${res.status})`
-        );
-      }
-      const xmlText = await res.text();
+      const xmlText = await fetchWithTimeout(tile.xmlUrl, async (res) => {
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => {});
+          throw new Error(
+            `NASA PDS4 XML label fetch failed for ${tile.productId}.xml (HTTP ${res.status})`
+          );
+        }
+        return await res.text();
+      });
       bytesTransferred = Buffer.byteLength(xmlText, 'utf8');
       const parsed = parsePds4TileXml(tile.productId, xmlText);
       labelMemoryCache.set(tile.productId, parsed);
@@ -697,25 +910,13 @@ export async function fetchPds4MolaElevationPatch(
       task.label.bytesOffset +
       (task.tileRow * task.label.samples + task.maxTileCol) * 2 +
       1;
-    const expectedLen = endByte - startByte + 1;
-
-    const res = await fetchWithTimeout(task.tile.imgUrl, {
-      headers: { Range: `bytes=${startByte}-${endByte}` },
-    });
-    if (!res.ok && res.status !== 206) {
-      throw new Error(
-        `NASA PDS4 raster range fetch failed for ${task.tile.productId}.img (HTTP ${res.status})`
-      );
-    }
-
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = await fetchPds4RangeBytes(
+      task.tile.imgUrl,
+      startByte,
+      endByte,
+      `${task.tile.productId}.img`
+    );
     totalBytesTransferred += buf.byteLength;
-
-    if (buf.byteLength < expectedLen) {
-      throw new Error(
-        `Truncated PDS4 raster response for ${task.tile.productId}.img (${buf.byteLength} < ${expectedLen} bytes)`
-      );
-    }
 
     for (const binding of task.colBindings) {
       const relOffset = (binding.tileCol - task.minTileCol) * 2;
