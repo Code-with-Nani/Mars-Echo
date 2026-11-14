@@ -16,7 +16,7 @@ const LABEL_CACHE_DIR = path.join(CACHE_ROOT, 'labels');
 const PATCH_CACHE_DIR = path.join(CACHE_ROOT, 'patches');
 
 const REQUEST_TIMEOUT_MS = 20000;
-const TARGET_MAX_ROWS = 32;
+const DEFAULT_TARGET_MAX_ROWS = 32;
 const RANGE_CONCURRENCY = 6;
 
 export interface ServerElevationDatasetInfo {
@@ -468,12 +468,18 @@ interface RowRangeTask {
 
 export async function fetchPds4MolaElevationPatch(
   datasetId: 'mola-pds4-meg128' | 'mola-pds4-meg064',
-  rawBounds: [number, number, number, number]
+  rawBounds: [number, number, number, number],
+  requestedMaxRows = DEFAULT_TARGET_MAX_ROWS
 ): Promise<ServerMolaGridResponse> {
   const dataset = SERVER_ELEVATION_DATASETS.find((d) => d.id === datasetId);
   if (!dataset) {
     throw new Error(`Unknown PDS4 MOLA dataset: ${datasetId}`);
   }
+
+  const targetMaxRows = Math.max(
+    16,
+    Math.min(56, Math.round(Number.isFinite(requestedMaxRows) ? requestedMaxRows : DEFAULT_TARGET_MAX_ROWS))
+  );
 
   const minLon = Math.max(-180, Math.min(180, rawBounds[0]));
   const minLat = Math.max(-90, Math.min(90, rawBounds[1]));
@@ -497,7 +503,7 @@ export async function fetchPds4MolaElevationPatch(
     Math.round(maxLon * 10000) / 10000,
     Math.round(maxLat * 10000) / 10000,
   ];
-  const cacheKey = `${datasetId}:${normalizedBounds.join(',')}`;
+  const cacheKey = `${datasetId}:${normalizedBounds.join(',')}:r${targetMaxRows}`;
 
   const memCached = patchMemoryCache.get(cacheKey);
   if (memCached) {
@@ -552,7 +558,7 @@ export async function fetchPds4MolaElevationPatch(
   );
 
   const rowSpanPx = globalRowEnd - globalRowStart + 1;
-  const rowStride = Math.max(1, Math.ceil(rowSpanPx / TARGET_MAX_ROWS));
+  const rowStride = Math.max(1, Math.ceil(rowSpanPx / targetMaxRows));
 
   const centerLatRad = (((minLat + maxLat) / 2) * Math.PI) / 180;
   const cosLat = Math.max(0.25, Math.cos(centerLatRad));

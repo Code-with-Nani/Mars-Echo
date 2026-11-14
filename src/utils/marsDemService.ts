@@ -120,9 +120,10 @@ const patchCache = new Map<string, SampledElevationPatch>();
 
 function buildBoundsCacheKey(
   datasetId: ElevationDatasetId,
-  bounds: [number, number, number, number]
+  bounds: [number, number, number, number],
+  maxRows: number
 ): string {
-  return `${datasetId}:${bounds.map((v) => v.toFixed(4)).join(',')}`;
+  return `${datasetId}:${bounds.map((v) => v.toFixed(4)).join(',')}:r${maxRows}`;
 }
 
 /**
@@ -133,7 +134,8 @@ function buildBoundsCacheKey(
 export async function fetchMarsElevationPatch(
   datasetId: ElevationDatasetId,
   rawBounds: [number, number, number, number],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  maxRows = 32
 ): Promise<SampledElevationPatch> {
   const dataset = ELEVATION_DATASET_BY_ID[datasetId];
   if (!dataset) {
@@ -160,7 +162,8 @@ export async function fetchMarsElevationPatch(
     Math.round(maxLon * 10000) / 10000,
     Math.round(maxLat * 10000) / 10000,
   ];
-  const cacheKey = buildBoundsCacheKey(datasetId, normalizedBounds);
+  const safeMaxRows = Math.max(16, Math.min(56, Math.round(maxRows)));
+  const cacheKey = buildBoundsCacheKey(datasetId, normalizedBounds, safeMaxRows);
   const cached = patchCache.get(cacheKey);
   if (cached) return cached;
 
@@ -212,6 +215,7 @@ export async function fetchMarsElevationPatch(
     minLat: String(normalizedBounds[1]),
     maxLon: String(normalizedBounds[2]),
     maxLat: String(normalizedBounds[3]),
+    maxRows: String(safeMaxRows),
   });
 
   const res = await fetch(`/api/terrain/mola-grid?${params.toString()}`, {

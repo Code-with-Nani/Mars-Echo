@@ -13,6 +13,7 @@ import TileGrid from 'ol/tilegrid/TileGrid';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import Polygon from 'ol/geom/Polygon';
+import LineString from 'ol/geom/LineString';
 import {
   Circle as CircleStyle,
   Fill,
@@ -32,16 +33,19 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import type {
+  CandidateRouteEvaluation,
   ElevationDatasetId,
   ExplorationRegion,
   ExplorerSettings,
   FilterableMarkerCategory,
   MapLayerId,
   MarsLocation,
+  RoutePointInput,
   TerrainAnalysisScope,
   TerrainOverlayCellInfo,
   TileHealthState,
 } from '../types/mars';
+import type { RoutePickMode } from './RoutePlanningPanel';
 import { MARS_LAYER_BY_ID, MARS_MAP_LAYERS } from '../data/marsLayers';
 import {
   JEZERO_CRATER_SITE,
@@ -54,12 +58,14 @@ import {
   ELEVATION_DATASET_BY_ID,
   evaluateTerrainOverlay,
   fetchMarsElevationPatch,
+  type EvaluatedTerrainOverlay,
   type SampledElevationPatch,
 } from '../utils/marsDemService';
 import {
   normalizeSlopeThresholds,
   type SlopeThresholds,
 } from '../utils/terrainAnalyzer';
+import { computeMissionCorridorBounds } from '../utils/returnPathOptimizer';
 import { MapLayerControl } from './MapLayerControl';
 import { CoordinateDisplay } from './CoordinateDisplay';
 import { MapDataInfoPanel } from './MapDataInfoPanel';
@@ -93,6 +99,18 @@ interface MarsMapProps {
   onChangeTerrainOpacity: (opacity: number) => void;
   selectedTerrainCell: TerrainOverlayCellInfo | null;
   onSelectTerrainCell: (cell: TerrainOverlayCellInfo | null) => void;
+  isRoutePlanningMode: boolean;
+  routePickMode: RoutePickMode;
+  onCancelRoutePick: () => void;
+  onPickRoutePoint: (role: 'habitat' | 'destination', lat: number, lon: number) => void;
+  habitatPoint: RoutePointInput | null;
+  destinationPoint: RoutePointInput | null;
+  activeRouteEvaluation: CandidateRouteEvaluation | null;
+  onTerrainStateUpdate: (state: {
+    overlay: EvaluatedTerrainOverlay | null;
+    loadState: TerrainOverlayLoadState;
+    error: string | null;
+  }) => void;
 }
 
 function getTerrainCellRgba(
@@ -140,6 +158,14 @@ export const MarsMap: React.FC<MarsMapProps> = ({
   onChangeTerrainOpacity,
   selectedTerrainCell,
   onSelectTerrainCell,
+  isRoutePlanningMode,
+  routePickMode,
+  onCancelRoutePick,
+  onPickRoutePoint,
+  habitatPoint,
+  destinationPoint,
+  activeRouteEvaluation,
+  onTerrainStateUpdate,
 }) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
@@ -149,6 +175,10 @@ export const MarsMap: React.FC<MarsMapProps> = ({
   );
   const terrainRiskLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const terrainRiskSourceRef = useRef<VectorSource | null>(null);
+  const routeLinesLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const routeLinesSourceRef = useRef<VectorSource | null>(null);
+  const routeMarkersLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const routeMarkersSourceRef = useRef<VectorSource | null>(null);
   const graticuleLayerRef = useRef<Graticule | null>(null);
   const regionLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const regionSourceRef = useRef<VectorSource | null>(null);
@@ -173,6 +203,10 @@ export const MarsMap: React.FC<MarsMapProps> = ({
   selectedTerrainCellRef.current = selectedTerrainCell;
   const onSelectTerrainCellRef = useRef(onSelectTerrainCell);
   onSelectTerrainCellRef.current = onSelectTerrainCell;
+  const routePickModeRef = useRef(routePickMode);
+  routePickModeRef.current = routePickMode;
+  const onPickRoutePointRef = useRef(onPickRoutePoint);
+  onPickRoutePointRef.current = onPickRoutePoint;
 
   const activeLayer = MARS_LAYER_BY_ID[activeLayerId];
   const activeElevationDataset = ELEVATION_DATASET_BY_ID[elevationDatasetId];
@@ -486,6 +520,97 @@ export const MarsMap: React.FC<MarsMapProps> = ({
       ],
     });
 
+    // Route Lines Layer (Outbound + Return Paths)
+    const routeLinesSource = new VectorSource();
+    routeLinesSourceRef.current = routeLinesSource;
+    const routeLinesLayer = new VectorLayer({
+      source: routeLinesSource,
+      style: (feature) => {
+        const legType = feature.get('legType') as 'outbound' | 'return';
+        if (legType === 'return') {
+          return [
+            new Style({
+              stroke: new Stroke({
+                color: '#07173F',
+                width: 5,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }),
+            }),
+            new Style({
+              stroke: new Stroke({
+                color: '#EAFE07',
+                width: 2.75,
+                lineDash: [8, 6],
+                lineCap: 'round',
+                lineJoin: 'round',
+              }),
+            }),
+          ];
+        }
+        return [
+          new Style({
+            stroke: new Stroke({
+              color: '#07173F',
+              width: 6,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }),
+          }),
+          new Style({
+            stroke: new Stroke({
+              color: '#2F96F5',
+              width: 3.5,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }),
+          }),
+        ];
+      },
+    });
+    routeLinesLayerRef.current = routeLinesLayer;
+
+    // Route Endpoints Layer (Habitat / Start & Exploration Destination)
+    const routeMarkersSource = new VectorSource();
+    routeMarkersSourceRef.current = routeMarkersSource;
+    const routeMarkersLayer = new VectorLayer({
+      source: routeMarkersSource,
+      style: (feature) => {
+        const role = feature.get('routeRole') as 'habitat' | 'destination';
+        if (role === 'habitat') {
+          return new Style({
+            image: new CircleStyle({
+              radius: 8,
+              fill: new Fill({ color: '#2F96F5' }),
+              stroke: new Stroke({ color: '#FFFFFF', width: 2.25 }),
+            }),
+            text: new Text({
+              text: 'HABITAT',
+              offsetY: -16,
+              font: '700 10px "Fira Sans", sans-serif',
+              fill: new Fill({ color: '#2F96F5' }),
+              stroke: new Stroke({ color: '#07173F', width: 3.5 }),
+            }),
+          });
+        }
+        return new Style({
+          image: new CircleStyle({
+            radius: 8,
+            fill: new Fill({ color: '#E43700' }),
+            stroke: new Stroke({ color: '#EAFE07', width: 2.25 }),
+          }),
+          text: new Text({
+            text: 'TARGET',
+            offsetY: -16,
+            font: '700 10px "Fira Sans", sans-serif',
+            fill: new Fill({ color: '#EAFE07' }),
+            stroke: new Stroke({ color: '#07173F', width: 3.5 }),
+          }),
+        });
+      },
+    });
+    routeMarkersLayerRef.current = routeMarkersLayer;
+
     const viewResolutions = Array.from(
       { length: 13 },
       (_, z) => 0.703125 / Math.pow(2, z)
@@ -514,7 +639,9 @@ export const MarsMap: React.FC<MarsMapProps> = ({
         terrainRiskLayer,
         graticule,
         regionLayer,
+        routeLinesLayer,
         sitesLayer,
+        routeMarkersLayer,
         selectionLayer,
       ],
       view,
@@ -579,6 +706,18 @@ export const MarsMap: React.FC<MarsMapProps> = ({
     });
 
     map.on('singleclick', (evt) => {
+      const [rawClickLon, rawClickLat] = evt.coordinate;
+
+      // Active Route Pick Mode takes immediate priority anywhere on the map
+      if (routePickModeRef.current !== 'none') {
+        if (rawClickLat >= -90 && rawClickLat <= 90) {
+          const pickedLat = Math.round(clampLat(rawClickLat) * 10000) / 10000;
+          const pickedLon = Math.round(normalizeLon(rawClickLon) * 10000) / 10000;
+          onPickRoutePointRef.current(routePickModeRef.current, pickedLat, pickedLon);
+        }
+        return;
+      }
+
       const hitFeature = map.forEachFeatureAtPixel(
         evt.pixel,
         (feature) => feature,
@@ -636,10 +775,9 @@ export const MarsMap: React.FC<MarsMapProps> = ({
         }
       }
 
-      const [rawLon, rawLat] = evt.coordinate;
-      if (rawLat < -90 || rawLat > 90) return;
-      const lat = clampLat(rawLat);
-      const lon = normalizeLon(rawLon);
+      if (rawClickLat < -90 || rawClickLat > 90) return;
+      const lat = clampLat(rawClickLat);
+      const lon = normalizeLon(rawClickLon);
       onSelectTerrainCellRef.current(null);
       onSelectLocationRef.current(createCustomSurfaceLocation(lat, lon));
     });
@@ -656,9 +794,11 @@ export const MarsMap: React.FC<MarsMapProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch elevation grid when Terrain Risk layer, dataset, region, or viewport sample changes
+  // Fetch elevation grid when Terrain Risk or Route Planning corridor changes
+  const shouldFetchTerrain = showTerrainRisk || isRoutePlanningMode;
+
   useEffect(() => {
-    if (!showTerrainRisk) {
+    if (!shouldFetchTerrain) {
       setSampledPatch(null);
       setTerrainLoadState('idle');
       setTerrainError(null);
@@ -666,8 +806,21 @@ export const MarsMap: React.FC<MarsMapProps> = ({
     }
 
     let targetBounds: [number, number, number, number] = selectedRegion.bounds;
+    let requestedMaxRows = 32;
 
-    if (terrainScope === 'viewport' && mapRef.current) {
+    if (isRoutePlanningMode && habitatPoint && destinationPoint) {
+      const corridor = computeMissionCorridorBounds(habitatPoint, destinationPoint);
+      if (!corridor.bounds) {
+        setSampledPatch(null);
+        setTerrainLoadState('unavailable');
+        setTerrainError(
+          corridor.error ?? 'Invalid Habitat or Destination corridor coordinates.'
+        );
+        return;
+      }
+      targetBounds = corridor.bounds;
+      requestedMaxRows = 44;
+    } else if (terrainScope === 'viewport' && mapRef.current) {
       const size = mapRef.current.getSize();
       if (size) {
         const ext = mapRef.current.getView().calculateExtent(size);
@@ -677,7 +830,6 @@ export const MarsMap: React.FC<MarsMapProps> = ({
         const rawMaxLat = Math.min(90, ext[3]);
         const centerLon = (rawMinLon + rawMaxLon) / 2;
         const centerLat = (rawMinLat + rawMaxLat) / 2;
-        // Cap viewport sampling window to max 4° x 3° to stay fast & memory-efficient
         const lonSpan = Math.min(4, Math.max(0.25, rawMaxLon - rawMinLon));
         const latSpan = Math.min(3, Math.max(0.25, rawMaxLat - rawMinLat));
         targetBounds = [
@@ -693,7 +845,12 @@ export const MarsMap: React.FC<MarsMapProps> = ({
     setTerrainLoadState('loading');
     setTerrainError(null);
 
-    fetchMarsElevationPatch(elevationDatasetId, targetBounds, controller.signal)
+    fetchMarsElevationPatch(
+      elevationDatasetId,
+      targetBounds,
+      controller.signal,
+      requestedMaxRows
+    )
       .then((patch) => {
         if (controller.signal.aborted) return;
         setSampledPatch(patch);
@@ -714,12 +871,91 @@ export const MarsMap: React.FC<MarsMapProps> = ({
       controller.abort();
     };
   }, [
-    showTerrainRisk,
+    shouldFetchTerrain,
+    isRoutePlanningMode,
     elevationDatasetId,
     selectedRegion,
     terrainScope,
     viewportNonce,
+    habitatPoint,
+    destinationPoint,
   ]);
+
+  // Notify parent App whenever evaluated terrain overlay or load state updates
+  useEffect(() => {
+    onTerrainStateUpdate({
+      overlay: evaluatedOverlay,
+      loadState: terrainLoadState,
+      error: terrainError,
+    });
+  }, [evaluatedOverlay, terrainLoadState, terrainError, onTerrainStateUpdate]);
+
+  // Sync route lines (Outbound + Return) & Habitat/Destination markers onto OpenLayers
+  useEffect(() => {
+    const lineSrc = routeLinesSourceRef.current;
+    const markerSrc = routeMarkersSourceRef.current;
+    if (!lineSrc || !markerSrc) return;
+
+    lineSrc.clear();
+    markerSrc.clear();
+
+    const showRoutes =
+      isRoutePlanningMode ||
+      Boolean(
+        activeRouteEvaluation &&
+          (activeRouteEvaluation.outbound.found ||
+            activeRouteEvaluation.returnLeg.found)
+      );
+
+    if (showRoutes && habitatPoint && Number.isFinite(habitatPoint.lat) && Number.isFinite(habitatPoint.lon)) {
+      const habFeature = new Feature({
+        geometry: new Point([habitatPoint.lon, habitatPoint.lat]),
+      });
+      habFeature.set('routeRole', 'habitat');
+      markerSrc.addFeature(habFeature);
+    }
+
+    if (
+      showRoutes &&
+      destinationPoint &&
+      Number.isFinite(destinationPoint.lat) &&
+      Number.isFinite(destinationPoint.lon)
+    ) {
+      const destFeature = new Feature({
+        geometry: new Point([destinationPoint.lon, destinationPoint.lat]),
+      });
+      destFeature.set('routeRole', 'destination');
+      markerSrc.addFeature(destFeature);
+    }
+
+    if (activeRouteEvaluation) {
+      if (
+        activeRouteEvaluation.outbound.found &&
+        activeRouteEvaluation.outbound.waypoints.length >= 2
+      ) {
+        const outFeature = new Feature({
+          geometry: new LineString(
+            activeRouteEvaluation.outbound.waypoints.map((w) => [w.lon, w.lat])
+          ),
+        });
+        outFeature.set('legType', 'outbound');
+        lineSrc.addFeature(outFeature);
+      }
+
+      if (
+        activeRouteEvaluation.returnLeg.found &&
+        activeRouteEvaluation.returnLeg.waypoints.length >= 2
+      ) {
+        const retFeature = new Feature({
+          geometry: new LineString(
+            activeRouteEvaluation.returnLeg.waypoints.map((w) => [w.lon, w.lat])
+          ),
+        });
+        retFeature.set('legType', 'return');
+        lineSrc.addFeature(retFeature);
+      }
+    }
+  }, [isRoutePlanningMode, habitatPoint, destinationPoint, activeRouteEvaluation]);
 
   // Populate OpenLayers Terrain Risk VectorSource when evaluated overlay updates
   useEffect(() => {
@@ -1002,6 +1238,50 @@ export const MarsMap: React.FC<MarsMapProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Active Route Pick Mode Banner */}
+      {routePickMode !== 'none' && (
+        <div className="pointer-events-auto absolute left-1/2 top-3.5 z-20 -translate-x-1/2 flex items-center gap-3 rounded-md border border-[#EAFE07] bg-[#07173F]/95 px-3.5 py-2 text-xs font-medium text-[#FFFFFF] shadow-xl">
+          <span className="h-2.5 w-2.5 rounded-full bg-[#EAFE07] animate-pulse" />
+          <span>
+            Click anywhere on the Mars map to set{' '}
+            <strong className="text-[#EAFE07]">
+              {routePickMode === 'habitat'
+                ? 'Habitat / Start'
+                : 'Exploration Destination'}
+            </strong>
+          </span>
+          <button
+            type="button"
+            onClick={onCancelRoutePick}
+            className="rounded border border-[#2F96F5]/50 bg-[#0042A6] px-2 py-0.5 text-[11px] hover:bg-[#0960E1]"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Active Route Key Badge when Outbound / Return paths are shown */}
+      {(isRoutePlanningMode ||
+        (activeRouteEvaluation &&
+          (activeRouteEvaluation.outbound.found ||
+            activeRouteEvaluation.returnLeg.found))) && (
+        <div className="pointer-events-auto absolute bottom-16 left-3.5 z-10 flex flex-wrap items-center gap-3 rounded-md border border-[#2F96F5]/45 bg-[#07173F]/95 px-3 py-1.5 text-[10px] text-[#FFFFFF] shadow-lg">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-0.5 w-4 bg-[#2F96F5]" />
+            <span>Outbound</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-0.5 w-4 border-t-2 border-dashed border-[#EAFE07]" />
+            <span>Return</span>
+          </span>
+          {activeRouteEvaluation && (
+            <span className="font-mono text-[#2F96F5]">
+              {activeRouteEvaluation.strategyName}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Tile Outage Fallback Notice */}
       {tileWarning && (

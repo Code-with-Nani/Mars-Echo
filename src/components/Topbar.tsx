@@ -29,9 +29,7 @@ const SECTION_TITLES: Record<NavSectionId, string> = {
   explorer: 'Mars Surface Explorer',
   'eva-resources': 'EVA Resource Monitor',
   'terrain-analysis': 'Terrain Analysis',
-  'route-planning': 'Route Planning',
-  'science-locations': 'Science Locations',
-  'mission-data': 'Mission Data',
+  'route-planning': 'Return Path Planning',
   settings: 'System Settings',
 };
 
@@ -245,20 +243,20 @@ export const Topbar: React.FC<TopbarProps> = ({
           <span className="font-medium text-[#FFFFFF]">{activeDataSource}</span>
         </div>
 
-        {activeSection === 'explorer' && (
+        {(activeSection === 'explorer' || activeSection === 'route-planning') && (
           <button
             type="button"
             onClick={onToggleRightPanel}
             className="flex items-center gap-1.5 rounded-md border border-[#0960E1] bg-[#0042A6] px-2.5 py-1.5 text-xs font-medium text-[#FFFFFF] hover:bg-[#0960E1] hover:border-[#2F96F5] transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2F96F5]"
             aria-label={
               isRightPanelOpen
-                ? 'Collapse Location Intelligence panel'
-                : 'Expand Location Intelligence panel'
+                ? 'Collapse side panel'
+                : 'Expand side panel'
             }
             title={
               isRightPanelOpen
-                ? 'Hide Location Intelligence'
-                : 'Show Location Intelligence'
+                ? 'Hide Side Panel'
+                : 'Show Side Panel'
             }
           >
             {isRightPanelOpen ? (
@@ -266,7 +264,9 @@ export const Topbar: React.FC<TopbarProps> = ({
             ) : (
               <PanelRightOpen className="h-3.5 w-3.5 text-[#EAFE07]" />
             )}
-            <span className="hidden md:inline">Intelligence</span>
+            <span className="hidden md:inline">
+              {activeSection === 'route-planning' ? 'Route Planner' : 'Intelligence'}
+            </span>
           </button>
         )}
 

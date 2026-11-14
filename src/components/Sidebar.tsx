@@ -5,8 +5,6 @@ import {
   Activity,
   Mountain,
   Route,
-  FlaskConical,
-  Database,
   SlidersHorizontal,
   X,
 } from 'lucide-react';
@@ -24,7 +22,6 @@ interface NavItemConfig {
   id: NavSectionId;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  comingSoon?: boolean;
 }
 
 const NAV_ITEMS: NavItemConfig[] = [
@@ -32,9 +29,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'explorer', label: 'Mars Explorer', icon: Globe2 },
   { id: 'eva-resources', label: 'EVA Resource Monitor', icon: Activity },
   { id: 'terrain-analysis', label: 'Terrain Analysis', icon: Mountain },
-  { id: 'route-planning', label: 'Route Planning', icon: Route, comingSoon: true },
-  { id: 'science-locations', label: 'Science Locations', icon: FlaskConical, comingSoon: true },
-  { id: 'mission-data', label: 'Mission Data', icon: Database, comingSoon: true },
+  { id: 'route-planning', label: 'Return Path Planning', icon: Route },
   { id: 'settings', label: 'Settings', icon: SlidersHorizontal },
 ];
 
@@ -143,25 +138,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         className={`h-4 w-4 shrink-0 transition-colors ${
                           isActive
                             ? 'text-[#2F96F5]'
-                            : item.comingSoon
-                              ? 'text-[#FFFFFF]/50 group-hover:text-[#FFFFFF]/85'
-                              : 'text-[#FFFFFF]/75 group-hover:text-[#2F96F5]'
+                            : 'text-[#FFFFFF]/75 group-hover:text-[#2F96F5]'
                         }`}
                       />
-                      <span
-                        className={`truncate ${
-                          item.comingSoon && !isActive ? 'text-[#FFFFFF]/70' : ''
-                        }`}
-                      >
-                        {item.label}
-                      </span>
+                      <span className="truncate">{item.label}</span>
                     </span>
-
-                    {item.comingSoon && (
-                      <span className="shrink-0 text-[11px] font-normal text-[#FFFFFF]/55">
-                        Soon
-                      </span>
-                    )}
                   </button>
                 </li>
               );
@@ -178,7 +159,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center justify-between gap-2">
               <dt className="text-[#FFFFFF]/70">Phase</dt>
               <dd className="font-mono text-[11px] text-[#FFFFFF] whitespace-nowrap">
-                Baseline GIS v0.1
+                REDLINE Module 4
               </dd>
             </div>
             <div className="flex items-center justify-between gap-2">

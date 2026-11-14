@@ -311,7 +311,7 @@ export function createCustomSurfaceLocation(
     dataSource: 'NASA Mars Trek / USGS Visual Tile Layer',
     observationStatus: 'Visual map selection — no live telemetry or DEM query',
     description:
-      'Arbitrary surface coordinate inspected on the Equirectangular Mars mosaic. Quantitative elevation sampling, slope derivation, and automated hazard scoring are reserved for subsequent REDLINE modules.',
+      'Arbitrary surface coordinate inspected on the Equirectangular Mars mosaic. Enable the Terrain Risk overlay or Return Path Planning to sample NASA PDS4 MOLA elevation, derive slope, and evaluate EVA return routes.',
     isReferenceSite: false,
   };
 }

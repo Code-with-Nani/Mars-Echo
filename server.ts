@@ -57,13 +57,14 @@ async function createApp() {
       return;
     }
 
+    const maxRows = req.query.maxRows ? Number(req.query.maxRows) : undefined;
+
     try {
-      const payload = await fetchPds4MolaElevationPatch(datasetParam, [
-        minLon,
-        minLat,
-        maxLon,
-        maxLat,
-      ]);
+      const payload = await fetchPds4MolaElevationPatch(
+        datasetParam,
+        [minLon, minLat, maxLon, maxLat],
+        maxRows
+      );
       res.json(payload);
     } catch (err) {
       const message =

@@ -30,20 +30,32 @@ import { ResourceConsumptionChart } from './eva/ResourceConsumptionChart';
 import { ResourceProfileConfig } from './eva/ResourceProfileConfig';
 import { ReturnReserveEstimator } from './eva/ReturnReserveEstimator';
 
-export const ResourceCalculatorView: React.FC = () => {
-  const [profile, setProfile] = useState<AstronautResourceProfile>(
-    DEFAULT_ASTRONAUT_PROFILE
-  );
-  const [thresholds, setThresholds] = useState<ResourceThresholds>(
-    DEFAULT_RESOURCE_THRESHOLDS
-  );
-  const [elapsedHours, setElapsedHours] = useState<number>(0);
+interface ResourceCalculatorViewProps {
+  profile: AstronautResourceProfile;
+  onChangeProfile: React.Dispatch<React.SetStateAction<AstronautResourceProfile>>;
+  thresholds: ResourceThresholds;
+  onChangeThresholds: React.Dispatch<React.SetStateAction<ResourceThresholds>>;
+  elapsedHours: number;
+  onChangeElapsedHours: React.Dispatch<React.SetStateAction<number>>;
+  returnProfile: ReturnJourneyProfile;
+  onChangeReturnProfile: React.Dispatch<React.SetStateAction<ReturnJourneyProfile>>;
+  onResetAll: () => void;
+}
+
+export const ResourceCalculatorView: React.FC<ResourceCalculatorViewProps> = ({
+  profile,
+  onChangeProfile: setProfile,
+  thresholds,
+  onChangeThresholds: setThresholds,
+  elapsedHours,
+  onChangeElapsedHours: setElapsedHours,
+  returnProfile,
+  onChangeReturnProfile: setReturnProfile,
+  onResetAll,
+}) => {
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [simSpeed, setSimSpeed] = useState<SimulationSpeed>(1);
   const [isConfigExpanded, setIsConfigExpanded] = useState<boolean>(false);
-  const [returnProfile, setReturnProfile] = useState<ReturnJourneyProfile>(
-    DEFAULT_RETURN_JOURNEY_PROFILE
-  );
 
   const normalizedThresholds = useMemo(
     () => normalizeThresholds(thresholds),
@@ -106,7 +118,7 @@ export const ResourceCalculatorView: React.FC = () => {
     }, tickMs);
 
     return () => window.clearInterval(timerId);
-  }, [isRunning, simSpeed, profile.availableMissionHours]);
+  }, [isRunning, simSpeed, profile.availableMissionHours, setElapsedHours]);
 
   const handleStart = () => {
     if (
@@ -141,10 +153,7 @@ export const ResourceCalculatorView: React.FC = () => {
 
   const handleResetDefaults = () => {
     setIsRunning(false);
-    setProfile(DEFAULT_ASTRONAUT_PROFILE);
-    setThresholds(DEFAULT_RESOURCE_THRESHOLDS);
-    setReturnProfile(DEFAULT_RETURN_JOURNEY_PROFILE);
-    setElapsedHours(0);
+    onResetAll();
     setSimSpeed(1);
   };
 

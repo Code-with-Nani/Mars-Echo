@@ -1,16 +1,13 @@
 import React from 'react';
 import {
   Globe2,
-  Layers,
   MapPin,
   ArrowRight,
   SlidersHorizontal,
-  Clock,
 } from 'lucide-react';
 import type {
   CoordinateFormat,
   ExplorerSettings,
-  NavSectionId,
   ScaleUnit,
 } from '../types/mars';
 import { MARS_MAP_LAYERS } from '../data/marsLayers';
@@ -324,103 +321,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               ))}
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-interface PlannedModuleViewProps {
-  sectionId: Exclude<
-    NavSectionId,
-    'overview' | 'explorer' | 'eva-resources' | 'terrain-analysis' | 'settings'
-  >;
-  onOpenExplorer: () => void;
-}
-
-const PLANNED_MODULES: Record<
-  Exclude<
-    NavSectionId,
-    'overview' | 'explorer' | 'eva-resources' | 'terrain-analysis' | 'settings'
-  >,
-  { title: string; summary: string; scope: string[] }
-> = {
-  'route-planning': {
-    title: 'Traverse & Route Planning',
-    summary:
-      'Scheduled for Phase 2. Will allow mission planners to author multi-waypoint EVA and rover traverses constrained by terrain slope limits.',
-    scope: [
-      'Waypoint sequence authoring on Equirectangular and local projections',
-      'Distance and cumulative elevation gain calculations',
-      'Hazard avoidance corridors around steep crater rims and escarpments',
-    ],
-  },
-  'science-locations': {
-    title: 'Science Locations Registry',
-    summary:
-      'Scheduled for Phase 3. Will connect CRISM spectral mineral detections and candidate geological sampling targets into the surface map.',
-    scope: [
-      'Mineralogy and stratigraphic unit overlays',
-      'Sample candidate annotation and mission priority tagging',
-      'Cross-referencing with published PDS science archives',
-    ],
-  },
-  'mission-data': {
-    title: 'Mission Data & PDS Catalog',
-    summary:
-      'Scheduled for Phase 3. Will manage offline tile bundles, GeoJSON mission overlays, and Planetary Data System (PDS) dataset metadata.',
-    scope: [
-      'Direct NASA Mars Trek WMTS capability browser',
-      'GeoJSON waypoint and boundary export for field ops',
-      'Dataset provenance and spatial resolution verification',
-    ],
-  },
-};
-
-export const PlannedModuleView: React.FC<PlannedModuleViewProps> = ({
-  sectionId,
-  onOpenExplorer,
-}) => {
-  const info = PLANNED_MODULES[sectionId];
-
-  return (
-    <div className="flex h-full items-center justify-center bg-[#07173F] p-6">
-      <div className="w-full max-w-xl rounded-md border border-[#0042A6] bg-[#0042A6]/30 p-6 space-y-5">
-        <div className="flex items-center gap-2 text-xs font-medium text-[#E43700]">
-          <Clock className="h-4 w-4" />
-          <span>Planned Development Phase · Not Yet Active</span>
-        </div>
-
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold text-[#FFFFFF]">{info.title}</h2>
-          <p className="text-xs leading-relaxed text-[#FFFFFF]/75">
-            {info.summary}
-          </p>
-        </div>
-
-        <div className="border-t border-[#0042A6] pt-4">
-          <div className="mb-2 text-xs font-semibold text-[#FFFFFF]">
-            Planned Capabilities
-          </div>
-          <ul className="space-y-1.5 text-xs text-[#FFFFFF]/80">
-            {info.scope.map((item) => (
-              <li key={item} className="flex items-start gap-2">
-                <Layers className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#2F96F5]" />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="flex items-center justify-end border-t border-[#0042A6] pt-4">
-          <button
-            type="button"
-            onClick={onOpenExplorer}
-            className="inline-flex items-center gap-2 rounded-md bg-[#2F96F5] px-4 py-2 text-xs font-semibold text-[#07173F] hover:bg-[#FFFFFF] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EAFE07]"
-          >
-            <Globe2 className="h-3.5 w-3.5" />
-            <span>Return to Mars Explorer</span>
-          </button>
         </div>
       </div>
     </div>
